@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-circle-dark text-white font-sans;
+  }
+  
+  * {
+    @apply box-border;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-6 py-3 bg-circle-blue hover:bg-blue-700 text-white font-semibold rounded-lg transition-all duration-200 transform hover:scale-105;
+  }
+  
+  .btn-secondary {
+    @apply px-6 py-3 border border-gray-600 hover:border-gray-500 text-white font-semibold rounded-lg transition-all duration-200;
+  }
+  
+  .input-field {
+    @apply w-full px-4 py-3 bg-circle-gray border border-gray-700 focus:border-circle-blue focus:ring-2 focus:ring-circle-blue focus:ring-opacity-50 rounded-lg text-white placeholder-gray-400 transition-all duration-200;
+  }
+  
+  .vault-door {
+    @apply transform-gpu transition-all duration-1000 ease-out;
+  }
+  
+  .vault-door.opening {
+    @apply animate-vault-open;
+  }
+  
+  .destruction-mode {
+    @apply animate-destruction;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-gradient-to-r from-circle-blue to-circle-purple bg-clip-text text-transparent;
+  }
+  
+  .glass-effect {
+    @apply backdrop-blur-sm bg-white bg-opacity-5 border border-white border-opacity-10;
+  }
+}
