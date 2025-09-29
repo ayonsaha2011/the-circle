@@ -10,17 +10,17 @@ pub struct User {
     pub email: String,
     pub password_hash: String,
     pub membership_tier: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub last_login: Option<DateTime<Utc>>,
-    pub failed_login_attempts: i32,
+    pub failed_login_attempts: Option<i32>,
     pub account_locked_until: Option<DateTime<Utc>>,
     pub destruction_key: Option<String>,
     pub biometric_hash: Option<String>,
-    pub mfa_enabled: bool,
+    pub mfa_enabled: Option<bool>,
     pub mfa_secret: Option<String>,
-    pub is_active: bool,
-    pub email_verified: bool,
+    pub is_active: Option<bool>,
+    pub email_verified: Option<bool>,
     pub email_verification_token: Option<String>,
     pub password_reset_token: Option<String>,
     pub password_reset_expires: Option<DateTime<Utc>>,
@@ -65,10 +65,10 @@ impl User {
             id: self.id,
             email: self.email.clone(),
             membership_tier: self.membership_tier.clone(),
-            created_at: self.created_at,
+            created_at: self.created_at.unwrap_or_else(|| Utc::now()),
             last_login: self.last_login,
-            mfa_enabled: self.mfa_enabled,
-            email_verified: self.email_verified,
+            mfa_enabled: self.mfa_enabled.unwrap_or(false),
+            email_verified: self.email_verified.unwrap_or(false),
         }
     }
     
@@ -81,6 +81,6 @@ impl User {
     }
     
     pub fn should_trigger_destruction(&self) -> bool {
-        self.failed_login_attempts >= 5 // Configurable threshold
+        self.failed_login_attempts.unwrap_or(0) >= 5 // Configurable threshold
     }
 }

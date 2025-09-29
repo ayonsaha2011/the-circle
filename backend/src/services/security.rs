@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::PgPool;
 use std::net::IpAddr;
+use ipnetwork::IpNetwork;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -44,7 +45,7 @@ impl SecurityService {
             "#,
             user_id,
             event_type,
-            ip_address,
+            ip_address.map(|ip| IpNetwork::from(ip)),
             user_agent,
             details,
             risk_level
