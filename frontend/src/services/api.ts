@@ -115,6 +115,23 @@ class ApiService {
       return false;
     }
   }
+
+  // Generic HTTP methods
+  async get(url: string) {
+    return this.client.get(url);
+  }
+
+  async post(url: string, data?: any) {
+    return this.client.post(url, data);
+  }
+
+  async put(url: string, data?: any) {
+    return this.client.put(url, data);
+  }
+
+  async delete(url: string) {
+    return this.client.delete(url);
+  }
 }
 
 export default new ApiService();

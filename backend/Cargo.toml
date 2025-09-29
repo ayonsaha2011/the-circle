@@ -40,13 +40,30 @@ reqwest = { version = "0.11", features = ["json"] }
 validator = { version = "0.18", features = ["derive"] }
 
 # Base64 encoding
-base64 = "0.21"
+base64 = { version = "0.21", features = ["std"] }
 
 # Decimal for currency
 rust_decimal = { version = "1.32", features = ["serde-with-str"] }
 
 # Random number generation
 rand = "0.8"
+
+# WebSocket support
+axum-websocket = "0.1"
+tokio-tungstenite = "0.20"
+futures-util = "0.3"
+
+# Encryption
+aes-gcm = "0.10"
+sha2 = "0.10"
+hkdf = "0.12"
+
+# AWS SDK
+aws-config = "0.57"
+aws-sdk-s3 = "0.36"
+
+# Time and scheduling
+tokio-cron-scheduler = "0.9"
 
 [dev-dependencies]
 tokio-test = "0.4"
