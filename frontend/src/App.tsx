@@ -5,6 +5,8 @@ import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
+import Messaging from './pages/Messaging';
+import VaultPage from './pages/VaultPage';
 import { DestructionProtocol } from './utils/destruction';
 
 // Initialize destruction protocol
@@ -48,6 +50,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <Dashboard />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/messaging" 
+            element={
+              <ProtectedRoute>
+                <Messaging />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/vault" 
+            element={
+              <ProtectedRoute>
+                <VaultPage />
               </ProtectedRoute>
             } 
           />

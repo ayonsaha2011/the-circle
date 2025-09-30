@@ -59,13 +59,12 @@ class WebRTCService {
     // Set up WebSocket event handlers for signaling
     const wsStore = useWebSocketStore.getState();
     
-    if (wsStore.socket) {
-      wsStore.socket.on('call_offer', this.handleCallOffer.bind(this));
-      wsStore.socket.on('call_answer', this.handleCallAnswer.bind(this));
-      wsStore.socket.on('ice_candidate', this.handleIceCandidate.bind(this));
-      wsStore.socket.on('call_ended', this.handleCallEnded.bind(this));
-      wsStore.socket.on('participant_joined', this.handleParticipantJoined.bind(this));
-      wsStore.socket.on('participant_left', this.handleParticipantLeft.bind(this));
+    if (wsStore.socket && wsStore.socket.readyState === WebSocket.OPEN) {
+      // Since we're using native WebSocket, we need to handle messages in the WebSocket store
+      // The WebRTC signaling will be handled through the WebSocket message system
+      console.log('WebSocket is ready for WebRTC signaling');
+    } else {
+      console.log('WebSocket not ready for WebRTC signaling');
     }
   }
 
@@ -231,8 +230,9 @@ class WebRTCService {
 
   private sendSignalingMessage(type: string, data: any) {
     const wsStore = useWebSocketStore.getState();
-    if (wsStore.socket && wsStore.isConnected) {
-      wsStore.socket.emit('webrtc_signal', { type, ...data });
+    if (wsStore.socket && wsStore.socket.readyState === WebSocket.OPEN) {
+      const message = { type, ...data };
+      wsStore.socket.send(JSON.stringify(message));
     }
   }
 
@@ -351,14 +351,16 @@ export const useWebRTCStore = create<WebRTCStore>((set, get) => ({
       
       // Send call invitation through WebSocket
       const wsStore = useWebSocketStore.getState();
-      if (wsStore.socket) {
-        wsStore.socket.emit('initiate_call', {
+      if (wsStore.socket && wsStore.socket.readyState === WebSocket.OPEN) {
+        const message = {
+          type: 'InitiateCall',
           callId,
           participantIds,
           callType: 'video',
-        });
+        };
+        wsStore.socket.send(JSON.stringify(message));
       }
-      
+
     } catch (error: any) {
       set({ error: error.message, callStatus: 'idle' });
     }
@@ -376,8 +378,12 @@ export const useWebRTCStore = create<WebRTCStore>((set, get) => ({
       
       // Send answer through WebSocket
       const wsStore = useWebSocketStore.getState();
-      if (wsStore.socket) {
-        wsStore.socket.emit('answer_call', { callId });
+      if (wsStore.socket && wsStore.socket.readyState === WebSocket.OPEN) {
+        const message = {
+          type: 'AnswerCall',
+          callId
+        };
+        wsStore.socket.send(JSON.stringify(message));
       }
       
     } catch (error: any) {
@@ -387,8 +393,12 @@ export const useWebRTCStore = create<WebRTCStore>((set, get) => ({
 
   rejectCall: async (callId: string) => {
     const wsStore = useWebSocketStore.getState();
-    if (wsStore.socket) {
-      wsStore.socket.emit('reject_call', { callId });
+    if (wsStore.socket && wsStore.socket.readyState === WebSocket.OPEN) {
+      const message = {
+        type: 'RejectCall',
+        callId
+      };
+      wsStore.socket.send(JSON.stringify(message));
     }
     
     set({ callStatus: 'idle', callId: null });
@@ -400,8 +410,12 @@ export const useWebRTCStore = create<WebRTCStore>((set, get) => ({
     
     if (callId) {
       const wsStore = useWebSocketStore.getState();
-      if (wsStore.socket) {
-        wsStore.socket.emit('end_call', { callId });
+      if (wsStore.socket && wsStore.socket.readyState === WebSocket.OPEN) {
+        const message = {
+          type: 'EndCall',
+          callId
+        };
+        wsStore.socket.send(JSON.stringify(message));
       }
     }
     

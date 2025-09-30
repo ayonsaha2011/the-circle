@@ -6,7 +6,7 @@ mod utils;
 
 use crate::config::Config;
 use crate::handlers::{auth, health};
-use crate::services::{AuthService, SecurityService};
+use crate::services::{AuthService, SecurityService, MessagingService, EncryptionService, WebSocketService};
 use crate::utils::AppState;
 use axum::{
     extract::ConnectInfo,
@@ -15,7 +15,7 @@ use axum::{
     Router,
 };
 use sqlx::postgres::PgPoolOptions;
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 use tower::ServiceBuilder;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -58,6 +58,13 @@ async fn main() {
         config.jwt_expiration,
         security_service.clone(),
     );
+    let encryption_service = EncryptionService::new();
+    let messaging_service = MessagingService::new(db.clone(), encryption_service, security_service.clone());
+    let websocket_service = Arc::new(WebSocketService::new(
+        messaging_service,
+        auth_service.clone(),
+        security_service.clone(),
+    ));
 
     // Create application state
     let app_state = AppState::new(db, config.clone(), auth_service, security_service);
@@ -65,6 +72,7 @@ async fn main() {
     // Setup CORS
     let cors = CorsLayer::new()
         .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap())
+        .allow_origin("*".parse::<HeaderValue>().unwrap())
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(Any);
 
@@ -81,6 +89,8 @@ async fn main() {
         .route("/api/auth/refresh", post(auth::refresh_token))
         // Add state and middleware
         .with_state(app_state)
+        .route("/ws", get(WebSocketService::handle_websocket))
+        .with_state(websocket_service)
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())

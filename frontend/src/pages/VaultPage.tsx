@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuthStore } from '../stores/authStore';
 import VaultDoor from '../components/vault/VaultDoor';
 import FileVault from '../components/vault/FileVault';
+import AppHeader from '../components/layout/AppHeader';
 import { 
   ShieldCheckIcon, 
   LockClosedIcon,
@@ -70,32 +71,21 @@ const VaultPage: React.FC = () => {
           transition={{ duration: 0.8 }}
           className="h-screen flex flex-col"
         >
-          {/* Enhanced Header */}
-          <div className="glass-effect border-b border-gray-800 shadow-xl">
+          <AppHeader />
+
+          {/* Vault Status Bar */}
+          <div className="glass-effect border-b border-gray-800 py-3">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="flex justify-between items-center py-6">
+              <div className="flex justify-between items-center">
                 <div className="flex items-center space-x-6">
-                  <button
-                    onClick={() => navigate('/dashboard')}
-                    className="flex items-center space-x-2 text-gray-300 hover:text-white transition-colors"
-                  >
-                    <ArrowLeftIcon className="h-5 w-5" />
-                    <span>Back to Dashboard</span>
-                  </button>
-                  
-                  <div className="h-8 w-px bg-gray-600"></div>
-                  
-                  <div>
-                    <h1 className="text-3xl font-bold text-gradient flex items-center space-x-3">
-                      <LockClosedIcon className="h-8 w-8 text-circle-blue" />
-                      <span>Secure File Vault</span>
-                    </h1>
-                    <p className="text-gray-400 mt-1">End-to-end encrypted file storage</p>
+                  <div className="flex items-center space-x-3">
+                    <LockClosedIcon className="h-6 w-6 text-circle-blue" />
+                    <h2 className="text-xl font-bold text-white">Secure File Vault</h2>
                   </div>
+                  <p className="text-gray-400 text-sm">End-to-end encrypted file storage</p>
                 </div>
                 
                 <div className="flex items-center space-x-6">
-                  {/* Security Status */}
                   <div className="flex items-center space-x-4">
                     <div className="flex items-center space-x-2">
                       <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
@@ -111,13 +101,6 @@ const VaultPage: React.FC = () => {
                       <ClockIcon className="h-4 w-4" />
                       <span className="text-xs">Auto-Expire</span>
                     </div>
-                  </div>
-                  
-                  <div className="h-8 w-px bg-gray-600"></div>
-                  
-                  <div className="text-right">
-                    <span className="text-gray-300 text-sm">Logged in as</span>
-                    <p className="text-circle-blue font-medium">{user.email}</p>
                   </div>
                 </div>
               </div>

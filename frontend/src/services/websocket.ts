@@ -1,4 +1,3 @@
-import { io, Socket } from 'socket.io-client';
 import { create } from 'zustand';
 import ClientEncryptionService from './encryption';
 
@@ -41,7 +40,7 @@ export interface UserPresence {
 
 // WebSocket Store
 interface WebSocketState {
-  socket: Socket | null;
+  socket: WebSocket | null;
   isConnected: boolean;
   isAuthenticated: boolean;
   conversations: Conversation[];
@@ -75,239 +74,220 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   typingUsers: {},
 
   connect: (token: string) => {
-    const socketUrl = process.env.REACT_APP_WS_URL || 'ws://localhost:8000';
-    const socket = io(socketUrl, {
-      auth: { token },
-      transports: ['websocket'],
-    });
+    const { socket, isConnected } = get();
+    
+    // Avoid creating duplicate connections
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+      console.log('WebSocket already connected or connecting');
+      return;
+    }
+
+    const socketUrl = process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws';
+    console.log('🔌 Connecting to WebSocket:', socketUrl);
+    const newSocket = new WebSocket(socketUrl);
 
     // Connection events
-    socket.on('connect', () => {
+    newSocket.onopen = () => {
       console.log('🔗 WebSocket connected');
-      set({ isConnected: true, socket });
+      set({ isConnected: true, socket: newSocket });
       
       // Authenticate immediately
-      socket.emit('authenticate', { token });
-    });
+      const authMessage = {
+        type: 'Authenticate',
+        token: token
+      };
+      newSocket.send(JSON.stringify(authMessage));
+    };
 
-    socket.on('disconnect', () => {
+    newSocket.onclose = () => {
       console.log('💔 WebSocket disconnected');
-      set({ isConnected: false, isAuthenticated: false });
-    });
+      set({ isConnected: false, isAuthenticated: false, socket: null });
+    };
 
-    socket.on('connect_error', (error) => {
+    newSocket.onerror = (error) => {
       console.error('❌ WebSocket connection error:', error);
       set({ isConnected: false, isAuthenticated: false });
-    });
+    };
 
-    // Authentication
-    socket.on('auth_result', (data: { success: boolean; user_id?: string }) => {
-      if (data.success) {
-        console.log('✅ WebSocket authenticated');
-        set({ isAuthenticated: true });
-      } else {
-        console.error('❌ WebSocket authentication failed');
-        set({ isAuthenticated: false });
+    newSocket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        console.log('📨 WebSocket message received:', message);
+        
+        switch (message.type) {
+          case 'AuthResult':
+            if (message.success) {
+              console.log('✅ WebSocket authenticated');
+              set({ isAuthenticated: true });
+            } else {
+              console.error('❌ WebSocket authentication failed');
+              set({ isAuthenticated: false });
+            }
+            break;
+            
+          case 'MessageReceived':
+            get().handleMessageReceived(message.message);
+            break;
+            
+          case 'MessageRead':
+            const state = get();
+            const updatedMessages = { ...state.messages };
+            
+            // Update read status for all conversations
+            Object.keys(updatedMessages).forEach(conversationId => {
+              updatedMessages[conversationId] = updatedMessages[conversationId].map(msg => 
+                msg.id === message.messageId 
+                  ? { ...msg, readBy: [...msg.readBy, message.userId] }
+                  : msg
+              );
+            });
+            
+            set({ messages: updatedMessages });
+            break;
+            
+          case 'TypingStart':
+            get().handleTypingStart(message.conversationId, message.userId);
+            break;
+            
+          case 'TypingStop':
+            get().handleTypingStop(message.conversationId, message.userId);
+            break;
+            
+          case 'UserOnline':
+            const currentState = get();
+            set({
+              userPresence: {
+                ...currentState.userPresence,
+                [message.userId]: {
+                  ...currentState.userPresence[message.userId],
+                  status: 'online',
+                  lastSeen: new Date().toISOString(),
+                } as UserPresence,
+              },
+            });
+            break;
+            
+          case 'UserOffline':
+            const offlineState = get();
+            set({
+              userPresence: {
+                ...offlineState.userPresence,
+                [message.userId]: {
+                  ...offlineState.userPresence[message.userId],
+                  status: 'offline',
+                  lastSeen: new Date().toISOString(),
+                } as UserPresence,
+              },
+            });
+            break;
+            
+          case 'Error':
+            console.error('🚨 WebSocket error:', message.message);
+            break;
+            
+          default:
+            console.log('Unknown message type:', message.type);
+        }
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
       }
-    });
+    };
 
-    // Message events
-    socket.on('message_received', (message: any) => {
-      console.log('📨 Message received:', message);
-      get().handleMessageReceived(message);
-    });
-
-    socket.on('message_read', (data: { messageId: string; userId: string }) => {
-      const state = get();
-      const updatedMessages = { ...state.messages };
-      
-      // Update read status for all conversations
-      Object.keys(updatedMessages).forEach(conversationId => {
-        updatedMessages[conversationId] = updatedMessages[conversationId].map(msg => 
-          msg.id === data.messageId 
-            ? { ...msg, readBy: [...msg.readBy, data.userId] }
-            : msg
-        );
-      });
-      
-      set({ messages: updatedMessages });
-    });
-
-    // Typing events
-    socket.on('typing_start', (data: { conversationId: string; userId: string }) => {
-      get().handleTypingStart(data.conversationId, data.userId);
-    });
-
-    socket.on('typing_stop', (data: { conversationId: string; userId: string }) => {
-      get().handleTypingStop(data.conversationId, data.userId);
-    });
-
-    // Presence events
-    socket.on('user_online', (data: { userId: string }) => {
-      const state = get();
-      set({
-        userPresence: {
-          ...state.userPresence,
-          [data.userId]: {
-            ...state.userPresence[data.userId],
-            status: 'online',
-            lastSeen: new Date().toISOString(),
-          } as UserPresence,
-        },
-      });
-    });
-
-    socket.on('user_offline', (data: { userId: string }) => {
-      const state = get();
-      set({
-        userPresence: {
-          ...state.userPresence,
-          [data.userId]: {
-            ...state.userPresence[data.userId],
-            status: 'offline',
-            lastSeen: new Date().toISOString(),
-          } as UserPresence,
-        },
-      });
-    });
-
-    // Error handling
-    socket.on('error', (error: { message: string }) => {
-      console.error('🚨 WebSocket error:', error.message);
-    });
-
-    set({ socket });
+    set({ socket: newSocket });
   },
 
   disconnect: () => {
     const { socket } = get();
-    if (socket) {
-      socket.disconnect();
-      set({ 
-        socket: null, 
-        isConnected: false, 
-        isAuthenticated: false,
-        conversations: [],
-        messages: {},
-        userPresence: {},
-        typingUsers: {},
-      });
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      console.log('Disconnecting WebSocket...');
+      socket.close();
     }
+    set({ 
+      socket: null, 
+      isConnected: false, 
+      isAuthenticated: false,
+      conversations: [],
+      messages: {},
+      userPresence: {},
+      typingUsers: {},
+    });
   },
 
   sendMessage: (conversationId: string, content: string, messageType = 'text') => {
     const { socket, isAuthenticated } = get();
-    if (!socket || !isAuthenticated) return;
+    if (!socket || !isAuthenticated || socket.readyState !== WebSocket.OPEN) return;
 
-    // Find conversation to get encryption key
-    const conversation = get().conversations.find(c => c.id === conversationId);
-    if (!conversation?.encryptionKey) {
-      console.error('❌ No encryption key for conversation:', conversationId);
-      return;
-    }
+    const messageData = {
+      type: 'SendMessage',
+      conversationId,
+      content,
+      messageType,
+    };
 
-    try {
-      // Encrypt message content
-      const encryptedContent = ClientEncryptionService.encryptMessage(content, conversation.encryptionKey);
-      
-      const message = {
-        conversationId,
-        content_encrypted: encryptedContent,
-        message_type: messageType,
-        expires_in_minutes: null, // No expiration for now
-      };
-
-      socket.emit('message_sent', { message });
-      
-      // Add to local state immediately for optimistic updates
-      const tempMessage: Message = {
-        id: `temp-${Date.now()}`,
-        conversationId,
-        senderId: 'current_user', // Should be current user ID
-        content,
-        messageType,
-        createdAt: new Date().toISOString(),
-        readBy: [],
-        reactions: {},
-      };
-      
-      get().handleMessageReceived(tempMessage);
-      
-    } catch (error) {
-      console.error('❌ Failed to encrypt and send message:', error);
-    }
+    socket.send(JSON.stringify(messageData));
   },
 
   markMessageRead: (messageId: string, conversationId: string) => {
     const { socket, isAuthenticated } = get();
-    if (!socket || !isAuthenticated) return;
+    if (!socket || !isAuthenticated || socket.readyState !== WebSocket.OPEN) return;
 
-    socket.emit('message_read', { 
-      message_id: messageId, 
-      user_id: 'current_user' // Should be current user ID
-    });
+    const messageData = {
+      type: 'MessageRead',
+      messageId,
+      conversationId,
+    };
+
+    socket.send(JSON.stringify(messageData));
   },
 
   startTyping: (conversationId: string) => {
     const { socket, isAuthenticated } = get();
-    if (!socket || !isAuthenticated) return;
+    if (!socket || !isAuthenticated || socket.readyState !== WebSocket.OPEN) return;
 
-    socket.emit('typing_start', { 
-      conversation_id: conversationId, 
-      user_id: 'current_user' 
-    });
+    const messageData = {
+      type: 'TypingStart',
+      conversationId,
+    };
+
+    socket.send(JSON.stringify(messageData));
   },
 
   stopTyping: (conversationId: string) => {
     const { socket, isAuthenticated } = get();
-    if (!socket || !isAuthenticated) return;
+    if (!socket || !isAuthenticated || socket.readyState !== WebSocket.OPEN) return;
 
-    socket.emit('typing_stop', { 
-      conversation_id: conversationId, 
-      user_id: 'current_user' 
-    });
+    const messageData = {
+      type: 'TypingStop',
+      conversationId,
+    };
+
+    socket.send(JSON.stringify(messageData));
   },
 
   createConversation: (name: string, participantIds: string[]) => {
-    // This would typically make an API call to create conversation
-    // then the server would notify via WebSocket
-    console.log('Creating conversation:', name, participantIds);
+    const { socket, isAuthenticated } = get();
+    if (!socket || !isAuthenticated || socket.readyState !== WebSocket.OPEN) return;
+
+    const messageData = {
+      type: 'CreateConversation',
+      name,
+      participantIds,
+    };
+
+    socket.send(JSON.stringify(messageData));
   },
 
   handleMessageReceived: (message: Message) => {
     const state = get();
-    const conversationMessages = state.messages[message.conversationId] || [];
+    const conversationId = message.conversationId;
+    const currentMessages = state.messages[conversationId] || [];
     
-    // Check if message already exists (avoid duplicates)
-    const existingIndex = conversationMessages.findIndex(m => m.id === message.id);
-    
-    let updatedMessages;
-    if (existingIndex >= 0) {
-      // Update existing message
-      updatedMessages = [...conversationMessages];
-      updatedMessages[existingIndex] = message;
-    } else {
-      // Add new message
-      updatedMessages = [...conversationMessages, message].sort(
-        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-      );
-    }
-
     set({
       messages: {
         ...state.messages,
-        [message.conversationId]: updatedMessages,
+        [conversationId]: [...currentMessages, message],
       },
     });
-
-    // Update conversation last message
-    const conversations = state.conversations.map(conv => 
-      conv.id === message.conversationId
-        ? { ...conv, lastMessage: message, updatedAt: message.createdAt }
-        : conv
-    );
-    
-    set({ conversations });
   },
 
   handleTypingStart: (conversationId: string, userId: string) => {
@@ -346,5 +326,3 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
     });
   },
 }));
-
-export default useWebSocketStore;

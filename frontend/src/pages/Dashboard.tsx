@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { ShieldCheckIcon, UserCircleIcon, CogIcon } from '@heroicons/react/24/outline';
+import AppHeader from '../components/layout/AppHeader';
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -28,25 +29,7 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-circle-dark via-gray-900 to-black">
-      {/* Header */}
-      <header className="glass-effect border-b border-gray-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-6">
-            <div className="flex items-center">
-              <h1 className="text-2xl font-bold text-gradient">The Circle</h1>
-            </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-gray-300">Welcome, {user.email}</span>
-              <button
-                onClick={handleLogout}
-                className="btn-secondary px-4 py-2 text-sm"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
+      <AppHeader />
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -90,25 +73,31 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Coming Soon Features */}
+        {/* Available Features */}
         <div className="glass-effect p-8 rounded-xl">
-          <h3 className="text-xl font-semibold text-white mb-6">Phase 2 Features Coming Soon</h3>
+          <h3 className="text-xl font-semibold text-white mb-6">Available Features</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="border border-gray-700 rounded-lg p-4 opacity-50">
-              <h4 className="font-semibold text-gray-300 mb-2">🔒 Secure Messaging</h4>
-              <p className="text-gray-500 text-sm">End-to-end encrypted conversations</p>
-            </div>
-            <div className="border border-gray-700 rounded-lg p-4 opacity-50">
-              <h4 className="font-semibold text-gray-300 mb-2">🗃️ File Vaults</h4>
-              <p className="text-gray-500 text-sm">Encrypted file storage and sharing</p>
-            </div>
+            <button
+              onClick={() => navigate('/messaging')}
+              className="border border-circle-blue hover:border-circle-blue/80 rounded-lg p-4 transition-all hover:scale-105 cursor-pointer group"
+            >
+              <h4 className="font-semibold text-circle-blue group-hover:text-circle-blue/80 mb-2">🔒 Secure Messaging</h4>
+              <p className="text-gray-300 text-sm">End-to-end encrypted conversations</p>
+            </button>
+            <button
+              onClick={() => navigate('/vault')}
+              className="border border-circle-green hover:border-circle-green/80 rounded-lg p-4 transition-all hover:scale-105 cursor-pointer group"
+            >
+              <h4 className="font-semibold text-circle-green group-hover:text-circle-green/80 mb-2">🗃️ File Vaults</h4>
+              <p className="text-gray-300 text-sm">Encrypted file storage and sharing</p>
+            </button>
             <div className="border border-gray-700 rounded-lg p-4 opacity-50">
               <h4 className="font-semibold text-gray-300 mb-2">📹 Video Calls</h4>
-              <p className="text-gray-500 text-sm">Secure video communication</p>
+              <p className="text-gray-500 text-sm">Secure video communication (Coming Soon)</p>
             </div>
             <div className="border border-gray-700 rounded-lg p-4 opacity-50">
               <h4 className="font-semibold text-gray-300 mb-2">⚡ Destruction Protocols</h4>
-              <p className="text-gray-500 text-sm">Advanced security features</p>
+              <p className="text-gray-500 text-sm">Advanced security features (Coming Soon)</p>
             </div>
           </div>
         </div>

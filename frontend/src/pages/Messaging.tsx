@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useWebSocketStore } from '../services/websocket';
 import ConversationList from '../components/messaging/ConversationList';
 import ChatInterface from '../components/messaging/ChatInterface';
+import AppHeader from '../components/layout/AppHeader';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ShieldCheckIcon, 
@@ -27,16 +28,21 @@ const MessagingPage: React.FC = () => {
       return;
     }
 
-    // Connect to WebSocket with auth token
+    // Connect to WebSocket with auth token only if not already connected or connecting
     const token = localStorage.getItem('access_token');
     if (token && !isConnected) {
+      console.log('Messaging: Initiating WebSocket connection');
       connect(token);
     }
+  }, [isAuthenticated, navigate]);
 
+  // Separate cleanup effect
+  useEffect(() => {
     return () => {
-      disconnect();
+      // Only disconnect when leaving the messaging page entirely
+      console.log('Messaging: Component unmounting');
     };
-  }, [isAuthenticated, navigate, connect, disconnect, isConnected]);
+  }, []);
 
   const handleEnterVault = async () => {
     setVaultUnlocking(true);
@@ -82,39 +88,24 @@ const MessagingPage: React.FC = () => {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="h-screen flex"
+          className="h-screen flex flex-col"
         >
-          {/* Header */}
-          <div className="absolute top-0 left-0 right-0 z-10 glass-effect border-b border-gray-800">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="flex justify-between items-center py-4">
-                <div className="flex items-center space-x-4">
-                  <h1 className="text-2xl font-bold text-gradient">The Circle</h1>
-                  <div className="flex items-center space-x-2">
-                    <div className={`w-2 h-2 rounded-full ${
-                      isConnected && wsAuthenticated ? 'bg-green-500' : 'bg-red-500'
-                    }`}></div>
-                    <span className="text-sm text-gray-400">
-                      {isConnected && wsAuthenticated ? 'Secure Connection' : 'Connecting...'}
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="flex items-center space-x-4">
-                  <span className="text-gray-300">Welcome, {user.email}</span>
-                  <button
-                    onClick={() => navigate('/dashboard')}
-                    className="btn-secondary px-4 py-2 text-sm"
-                  >
-                    Dashboard
-                  </button>
-                </div>
-              </div>
+          <AppHeader />
+
+          {/* WebSocket Status */}
+          <div className="flex items-center justify-center py-2 bg-black/50">
+            <div className="flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${
+                isConnected && wsAuthenticated ? 'bg-green-500' : 'bg-red-500'
+              }`}></div>
+              <span className="text-sm text-gray-400">
+                {isConnected && wsAuthenticated ? 'Secure Connection' : 'Connecting...'}
+              </span>
             </div>
           </div>
 
           {/* Main Content */}
-          <div className="flex w-full pt-20">
+          <div className="flex flex-1">
             {/* Conversation List */}
             <div className="w-1/3 min-w-[300px]">
               <ConversationList
