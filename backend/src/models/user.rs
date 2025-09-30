@@ -10,17 +10,17 @@ pub struct User {
     pub email: String,
     pub password_hash: String,
     pub membership_tier: String,
-    pub created_at: Option<DateTime<Utc>>,
-    pub updated_at: Option<DateTime<Utc>>,
+    pub created_at: Option<DateTime<Utc>>,    // NOT NULL with DEFAULT but SQLx treats as nullable
+    pub updated_at: Option<DateTime<Utc>>,    // NOT NULL with DEFAULT but SQLx treats as nullable
     pub last_login: Option<DateTime<Utc>>,
-    pub failed_login_attempts: Option<i32>,
+    pub failed_login_attempts: Option<i32>,  // Nullable with DEFAULT
     pub account_locked_until: Option<DateTime<Utc>>,
     pub destruction_key: Option<String>,
     pub biometric_hash: Option<String>,
-    pub mfa_enabled: Option<bool>,
+    pub mfa_enabled: Option<bool>,        // Nullable with DEFAULT
     pub mfa_secret: Option<String>,
-    pub is_active: Option<bool>,
-    pub email_verified: Option<bool>,
+    pub is_active: Option<bool>,          // Nullable with DEFAULT
+    pub email_verified: Option<bool>,     // Nullable with DEFAULT
     pub email_verification_token: Option<String>,
     pub password_reset_token: Option<String>,
     pub password_reset_expires: Option<DateTime<Utc>>,
