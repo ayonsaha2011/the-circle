@@ -5,13 +5,13 @@ edition = "2021"
 
 [dependencies]
 # Web framework
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
 
 # Database
-sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono", "json", "migrate", "ipnetwork"] }
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono", "json", "migrate", "ipnetwork", "bigdecimal"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -44,6 +44,7 @@ base64 = { version = "0.21", features = ["std"] }
 
 # Decimal for currency
 rust_decimal = { version = "1.32", features = ["serde-with-str"] }
+bigdecimal = "0.4"
 
 # Random number generation
 rand = "0.8"
@@ -52,7 +53,6 @@ rand = "0.8"
 ipnetwork = "0.20"
 
 # WebSocket support
-axum-websocket = "0.1"
 tokio-tungstenite = "0.20"
 futures-util = "0.3"
 

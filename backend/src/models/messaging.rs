@@ -7,50 +7,50 @@ use chrono::{DateTime, Utc};
 pub struct Conversation {
     pub id: Uuid,
     pub name: Option<String>,
-    pub r#type: String, // 'direct', 'group', 'broadcast'
+    pub r#type: String, // 'direct', 'group', 'broadcast' - NOT NULL in DB
     pub creator_id: Option<Uuid>,
-    pub encryption_key_hash: String,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub encryption_key_hash: String, // NOT NULL in DB
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
     pub expires_at: Option<DateTime<Utc>>,
-    pub is_active: bool,
-    pub settings: serde_json::Value,
+    pub is_active: Option<bool>,
+    pub settings: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct ConversationParticipant {
     pub id: Uuid,
-    pub conversation_id: Uuid,
-    pub user_id: Uuid,
-    pub role: String, // 'admin', 'member', 'viewer'
-    pub joined_at: DateTime<Utc>,
-    pub last_read_at: DateTime<Utc>,
-    pub is_active: bool,
-    pub permissions: serde_json::Value,
+    pub conversation_id: Option<Uuid>,
+    pub user_id: Option<Uuid>,
+    pub role: Option<String>, // 'admin', 'member', 'viewer'
+    pub joined_at: Option<DateTime<Utc>>,
+    pub last_read_at: Option<DateTime<Utc>>,
+    pub is_active: Option<bool>,
+    pub permissions: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct Message {
     pub id: Uuid,
-    pub conversation_id: Uuid,
+    pub conversation_id: Option<Uuid>, // Nullable in DB
     pub sender_id: Option<Uuid>,
-    pub content_encrypted: String,
-    pub message_type: String, // 'text', 'file', 'image', 'video', 'system'
+    pub content_encrypted: String, // NOT NULL in DB
+    pub message_type: Option<String>, // 'text', 'file', 'image', 'video', 'system'
     pub metadata_encrypted: Option<String>,
     pub reply_to_id: Option<Uuid>,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Option<DateTime<Utc>>,
     pub edited_at: Option<DateTime<Utc>>,
     pub expires_at: Option<DateTime<Utc>>,
     pub deleted_at: Option<DateTime<Utc>>,
     pub destruction_scheduled_at: Option<DateTime<Utc>>,
-    pub read_by: serde_json::Value, // Array of user IDs
-    pub reactions: serde_json::Value, // Reactions object
+    pub read_by: Option<serde_json::Value>, // Array of user IDs
+    pub reactions: Option<serde_json::Value>, // Reactions object
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MessagePublic {
     pub id: Uuid,
-    pub conversation_id: Uuid,
+    pub conversation_id: Option<Uuid>,
     pub sender_id: Option<Uuid>,
     pub content_encrypted: String, // Client will decrypt
     pub message_type: String,
@@ -83,7 +83,8 @@ pub struct SendMessageRequest {
 impl Message {
     pub fn to_public(&self) -> MessagePublic {
         let read_by: Vec<Uuid> = self.read_by
-            .as_array()
+            .as_ref()
+            .and_then(|v| v.as_array())
             .unwrap_or(&vec![])
             .iter()
             .filter_map(|v| v.as_str().and_then(|s| s.parse().ok()))
@@ -94,13 +95,13 @@ impl Message {
             conversation_id: self.conversation_id,
             sender_id: self.sender_id,
             content_encrypted: self.content_encrypted.clone(),
-            message_type: self.message_type.clone(),
+            message_type: self.message_type.clone().unwrap_or_else(|| "text".to_string()),
             metadata_encrypted: self.metadata_encrypted.clone(),
             reply_to_id: self.reply_to_id,
-            created_at: self.created_at,
+            created_at: self.created_at.unwrap_or_else(|| chrono::Utc::now()),
             edited_at: self.edited_at,
             read_by,
-            reactions: self.reactions.clone(),
+            reactions: self.reactions.clone().unwrap_or_else(|| serde_json::json!({})),
         }
     }
 }

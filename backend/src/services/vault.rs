@@ -1,9 +1,10 @@
-use crate::services::{EncryptionService, SecurityService};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::io::Cursor;
 use uuid::Uuid;
+use sqlx::types::BigDecimal;
+use crate::services::{EncryptionService, SecurityService};
 
 #[derive(Debug, Clone)]
 pub struct VaultService {
@@ -217,7 +218,7 @@ impl VaultService {
 
         // TODO: Store in S3 or local storage
         // For now, we'll simulate storage by just updating the database
-        let storage_path = format!("stored/{}", file_record.file_path);
+        let storage_path = format!("stored/{}", file_record.stored_filename);
 
         // Update file status to completed
         sqlx::query!(
@@ -243,7 +244,7 @@ impl VaultService {
 
         // Log successful upload
         self.security_service.log_security_event(
-            Some(token_record.user_id),
+            Some(token_record.user_id.unwrap_or_default()),
             "file_uploaded".to_string(),
             None,
             None,
@@ -255,7 +256,7 @@ impl VaultService {
         ).await;
 
         // Return file metadata
-        self.get_file_metadata(token_record.file_id, token_record.user_id).await
+        self.get_file_metadata(token_record.file_id.unwrap_or_default(), token_record.user_id.unwrap_or_default()).await
     }
 
     /// Get file metadata with access control
@@ -292,18 +293,18 @@ impl VaultService {
 
         Ok(FileMetadata {
             id: file.id,
-            filename: file.filename,
-            content_type: file.content_type,
+            filename: file.filename.unwrap_or_default(),
+            content_type: file.content_type.unwrap_or_default(),
             size: file.size,
-            uploader_id: file.uploader_id,
+            uploader_id: file.uploader_id.unwrap_or_default(),
             conversation_id: file.conversation_id,
-            access_level: file.access_level,
-            file_path: file.file_path,
-            encryption_key_hash: file.encryption_key_hash,
+            access_level: file.access_level.unwrap_or_default(),
+            file_path: file.file_path.unwrap_or_default(),
+            encryption_key_hash: file.encryption_metadata.unwrap_or_default(),
             checksum: file.checksum.unwrap_or_default(),
             expires_at: file.expires_at,
-            created_at: file.created_at,
-            download_count: file.download_count,
+            created_at: file.created_at.unwrap_or_else(|| Utc::now()),
+            download_count: file.download_count.unwrap_or(0),
         })
     }
 
@@ -367,9 +368,11 @@ impl VaultService {
     ) -> Result<Vec<FileMetadata>, VaultError> {
         let files = match conversation_id {
             Some(conv_id) => {
-                sqlx::query!(
+                sqlx::query(
                     r#"
-                    SELECT f.* FROM files f
+                    SELECT f.id, f.filename, f.content_type, f.size, f.uploader_id, f.conversation_id,
+                           f.access_level, f.file_path, f.encryption_metadata, f.checksum, f.expires_at, f.created_at, f.download_count
+                    FROM files f
                     WHERE f.conversation_id = $1 
                       AND f.status = 'completed'
                       AND (
@@ -379,18 +382,20 @@ impl VaultService {
                     ORDER BY f.created_at DESC
                     LIMIT $3 OFFSET $4
                     "#,
-                    conv_id,
-                    user_id,
-                    limit,
-                    offset
                 )
+                .bind(conv_id)
+                .bind(user_id)
+                .bind(limit)
+                .bind(offset)
                 .fetch_all(&self.db)
                 .await?
             }
             None => {
-                sqlx::query!(
+                sqlx::query(
                     r#"
-                    SELECT f.* FROM files f
+                    SELECT f.id, f.filename, f.content_type, f.size, f.uploader_id, f.conversation_id,
+                           f.access_level, f.file_path, f.encryption_metadata, f.checksum, f.expires_at, f.created_at, f.download_count
+                    FROM files f
                     LEFT JOIN conversation_participants cp ON f.conversation_id = cp.conversation_id
                     WHERE f.status = 'completed'
                       AND (
@@ -401,29 +406,32 @@ impl VaultService {
                     ORDER BY f.created_at DESC
                     LIMIT $2 OFFSET $3
                     "#,
-                    user_id,
-                    limit,
-                    offset
                 )
+                .bind(user_id)
+                .bind(limit)
+                .bind(offset)
                 .fetch_all(&self.db)
                 .await?
             }
         };
 
-        Ok(files.into_iter().map(|f| FileMetadata {
-            id: f.id,
-            filename: f.filename,
-            content_type: f.content_type,
-            size: f.size,
-            uploader_id: f.uploader_id,
-            conversation_id: f.conversation_id,
-            access_level: f.access_level,
-            file_path: f.file_path,
-            encryption_key_hash: f.encryption_key_hash,
-            checksum: f.checksum.unwrap_or_default(),
-            expires_at: f.expires_at,
-            created_at: f.created_at,
-            download_count: f.download_count,
+        Ok(files.into_iter().map(|row| {
+            use sqlx::Row;
+            FileMetadata {
+                id: row.get("id"),
+                filename: row.get::<Option<String>, _>("filename").unwrap_or_default(),
+                content_type: row.get::<Option<String>, _>("content_type").unwrap_or_default(),
+                size: row.get("size"),
+                uploader_id: row.get::<Option<Uuid>, _>("uploader_id").unwrap_or_default(),
+                conversation_id: row.get("conversation_id"),
+                access_level: row.get::<Option<String>, _>("access_level").unwrap_or_default(),
+                file_path: row.get::<Option<String>, _>("file_path").unwrap_or_default(),
+                encryption_key_hash: row.get::<Option<String>, _>("encryption_metadata").unwrap_or_default(),
+                checksum: row.get::<Option<String>, _>("checksum").unwrap_or_default(),
+                expires_at: row.get("expires_at"),
+                created_at: row.get::<Option<DateTime<Utc>>, _>("created_at").unwrap_or_else(|| Utc::now()),
+                download_count: row.get::<Option<i32>, _>("download_count").unwrap_or(0),
+            }
         }).collect())
     }
 
@@ -442,7 +450,7 @@ impl VaultService {
         .await?
         .ok_or(VaultError::FileNotFound)?;
 
-        if file.uploader_id != user_id {
+        if file.uploader_id != Some(user_id) {
             return Err(VaultError::AccessDenied);
         }
 
@@ -487,20 +495,20 @@ impl VaultService {
         .fetch_one(&self.db)
         .await?;
 
-        if user_usage.total_size.unwrap_or(0) + request.size > 1024 * 1024 * 1024 {
+        if user_usage.total_size.unwrap_or(BigDecimal::from(0)) + BigDecimal::from(request.size) > BigDecimal::from(1024 * 1024 * 1024) {
             return Err(VaultError::QuotaExceeded);
         }
 
         // Validate conversation access if specified
         if let Some(conv_id) = request.conversation_id {
             let is_participant = sqlx::query!(
-                "SELECT 1 FROM conversation_participants WHERE conversation_id = $1 AND user_id = $2",
+                "SELECT COUNT(*) as count FROM conversation_participants WHERE conversation_id = $1 AND user_id = $2",
                 conv_id,
                 user_id
             )
-            .fetch_optional(&self.db)
+            .fetch_one(&self.db)
             .await?
-            .is_some();
+            .count.unwrap_or(0) > 0;
 
             if !is_participant {
                 return Err(VaultError::AccessDenied);

@@ -169,6 +169,26 @@ impl EncryptionService {
         let result = hasher.finalize();
         base64::engine::general_purpose::STANDARD.encode(&result)
     }
+
+    /// Generate a secure random token
+    pub fn generate_secure_token(&self) -> String {
+        let mut token_bytes = [0u8; 32];
+        if self.rng.fill(&mut token_bytes).is_ok() {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&token_bytes)
+        } else {
+            // Fallback using UUID if ring fails
+            Uuid::new_v4().to_string().replace("-", "")
+        }
+    }
+
+    /// Hash a key using SHA-256
+    pub fn hash_key(&self, key: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(key);
+        let result = hasher.finalize();
+        base64::engine::general_purpose::STANDARD.encode(&result)
+    }
 }
 
 #[cfg(test)]

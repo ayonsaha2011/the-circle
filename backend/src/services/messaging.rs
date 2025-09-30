@@ -63,6 +63,11 @@ impl MessagingService {
         }
     }
 
+    /// Get a reference to the database pool
+    pub fn db(&self) -> &PgPool {
+        &self.db
+    }
+
     /// Create a new conversation
     pub async fn create_conversation(
         &self,
@@ -108,8 +113,8 @@ impl MessagingService {
         .await?;
 
         // Add other participants
-        for participant_id in request.participant_ids {
-            if participant_id != creator_id {
+        for participant_id in &request.participant_ids {
+            if *participant_id != creator_id {
                 sqlx::query!(
                     r#"
                     INSERT INTO conversation_participants (conversation_id, user_id, role)
@@ -270,8 +275,11 @@ impl MessagingService {
         .await?
         .ok_or(MessagingError::MessageNotFound)?;
 
+        // Get the conversation_id (handle Option<Uuid>)
+        let conversation_id = message.conversation_id.ok_or(MessagingError::MessageNotFound)?;
+
         // Verify user is in conversation
-        if !self.is_user_in_conversation(user_id, message.conversation_id).await? {
+        if !self.is_user_in_conversation(user_id, conversation_id).await? {
             return Err(MessagingError::UserNotInConversation);
         }
 
@@ -299,7 +307,7 @@ impl MessagingService {
             SET last_read_at = NOW() 
             WHERE conversation_id = $1 AND user_id = $2
             "#,
-            message.conversation_id,
+            conversation_id,
             user_id
         )
         .execute(&self.db)
@@ -341,7 +349,7 @@ impl MessagingService {
             let conversation = Conversation {
                 id: row.id,
                 name: row.name,
-                r#type: row.type_,
+                r#type: row.r#type, // r#type is already a String, not Option<String>
                 creator_id: row.creator_id,
                 encryption_key_hash: row.encryption_key_hash,
                 created_at: row.created_at,
@@ -353,12 +361,12 @@ impl MessagingService {
 
             let participant = ConversationParticipant {
                 id: Uuid::new_v4(), // Not used in this context
-                conversation_id: row.id,
-                user_id,
+                conversation_id: Some(row.id), // ConversationParticipant.conversation_id is Option<Uuid>
+                user_id: Some(user_id),
                 role: row.role,
                 joined_at: row.joined_at,
                 last_read_at: row.last_read_at,
-                is_active: true,
+                is_active: row.is_active,
                 permissions: row.permissions,
             };
 

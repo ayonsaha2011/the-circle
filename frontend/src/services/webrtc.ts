@@ -503,4 +503,4 @@ export const useWebRTCStore = create<WebRTCStore>((set, get) => ({
   setCallStatus: (status: CallState['callStatus']) => {
     set({ callStatus: status });
   },
-});
+}));

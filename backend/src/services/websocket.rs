@@ -1,10 +1,11 @@
-use crate::models::{WebSocketMessage, UserPresence};
 use crate::services::{AuthService, MessagingService, SecurityService};
+use crate::models::WebSocketMessage;
 use axum::{
     extract::{ws::{Message, WebSocket, WebSocketUpgrade}, ConnectInfo, State},
     response::Response,
 };
 use futures_util::{sink::SinkExt, stream::StreamExt};
+use serde_json;
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -12,6 +13,29 @@ use std::{
 };
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
+
+#[derive(Debug)]
+pub enum WebSocketError {
+    AuthError(crate::services::AuthError),
+    ParseError,
+}
+
+impl std::fmt::Display for WebSocketError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WebSocketError::AuthError(e) => write!(f, "Auth error: {}", e),
+            WebSocketError::ParseError => write!(f, "Parse error"),
+        }
+    }
+}
+
+impl std::error::Error for WebSocketError {}
+
+impl From<crate::services::AuthError> for WebSocketError {
+    fn from(err: crate::services::AuthError) -> Self {
+        WebSocketError::AuthError(err)
+    }
+}
 
 pub type UserConnections = Arc<RwLock<HashMap<Uuid, UserConnection>>>;
 
@@ -50,24 +74,29 @@ impl WebSocketService {
     pub async fn handle_websocket(
         ws: WebSocketUpgrade,
         ConnectInfo(addr): ConnectInfo<SocketAddr>,
-        State(service): State<WebSocketService>,
+        State(service): State<Arc<WebSocketService>>,
     ) -> Response {
         ws.on_upgrade(move |socket| service.handle_socket(socket, addr))
     }
 
     /// Handle individual WebSocket connection
     pub async fn handle_socket(self: Arc<Self>, socket: WebSocket, addr: SocketAddr) {
-        let (mut sender, mut receiver) = socket.split();
+        let (sender, mut receiver) = socket.split();
         
         // Create broadcast channel for this connection
         let (tx, _rx) = broadcast::channel(1000);
         let mut authenticated_user: Option<Uuid> = None;
         let mut rx = tx.subscribe();
+        
+        // Wrap sender in Arc<Mutex> to allow sharing
+        let sender = Arc::new(tokio::sync::Mutex::new(sender));
+        let sender_clone = sender.clone();
 
         // Spawn task to handle outgoing messages
         let tx_clone = tx.clone();
         let sender_task = tokio::spawn(async move {
             while let Ok(msg) = rx.recv().await {
+                let mut sender = sender_clone.lock().await;
                 if sender.send(Message::Text(msg)).await.is_err() {
                     break;
                 }
@@ -81,7 +110,8 @@ impl WebSocketService {
                 Ok(Message::Close(_)) => break,
                 Ok(Message::Ping(data)) => {
                     // Respond to ping with pong
-                    if sender.send(Message::Pong(data)).await.is_err() {
+                    let mut sender_guard = sender.lock().await;
+                    if sender_guard.send(Message::Pong(data)).await.is_err() {
                         break;
                     }
                     continue;
@@ -154,7 +184,9 @@ impl WebSocketService {
                 WebSocketMessage::MessageSent { message } => {
                     if let Some(user_id) = authenticated_user {
                         // Broadcast message to conversation participants
-                        self.broadcast_message_to_conversation(message.conversation_id, &message).await;
+                        if let Some(conversation_id) = message.conversation_id {
+                            self.broadcast_message_to_conversation(conversation_id, &message).await;
+                        }
                     }
                 }
 
@@ -166,10 +198,12 @@ impl WebSocketService {
                             
                             // Broadcast read receipt
                             if let Ok(message) = self.get_message_for_read_receipt(message_id).await {
-                                self.broadcast_message_to_conversation(
-                                    message.conversation_id,
-                                    &WebSocketMessage::MessageRead { message_id, user_id }
-                                ).await;
+                                if let Some(conversation_id) = message.conversation_id {
+                                    self.broadcast_message_to_conversation(
+                                        conversation_id,
+                                        &WebSocketMessage::MessageRead { message_id, user_id }
+                                    ).await;
+                                }
                             }
                         }
                     }
@@ -237,9 +271,9 @@ impl WebSocketService {
     }
 
     /// Authenticate user with JWT token
-    async fn authenticate_user(&self, token: &str) -> Result<Uuid, Box<dyn std::error::Error>> {
+    async fn authenticate_user(&self, token: &str) -> Result<Uuid, WebSocketError> {
         let claims = self.auth_service.verify_token(token)?;
-        let user_id = claims.sub.parse::<Uuid>()?;
+        let user_id = claims.sub.parse::<Uuid>().map_err(|_| WebSocketError::ParseError)?;
         Ok(user_id)
     }
 
@@ -265,7 +299,7 @@ impl WebSocketService {
             status,
             custom_status
         )
-        .execute(&self.messaging_service.db)
+        .execute(self.messaging_service.db())
         .await?;
 
         Ok(())
@@ -334,25 +368,28 @@ impl WebSocketService {
     }
 
     /// Get conversation participants
-    async fn get_conversation_participants(&self, conversation_id: Uuid) -> Result<Vec<Uuid>, Box<dyn std::error::Error>> {
+    async fn get_conversation_participants(&self, conversation_id: Uuid) -> Result<Vec<Uuid>, crate::services::MessagingError> {
         let participants = sqlx::query_scalar!(
             "SELECT user_id FROM conversation_participants WHERE conversation_id = $1 AND is_active = true",
             conversation_id
         )
-        .fetch_all(&self.messaging_service.db)
-        .await?;
+        .fetch_all(self.messaging_service.db())
+        .await?
+        .into_iter()
+        .filter_map(|id| id)
+        .collect::<Vec<Uuid>>();
 
         Ok(participants)
     }
 
     /// Get message for read receipt (simplified)
-    async fn get_message_for_read_receipt(&self, message_id: Uuid) -> Result<crate::models::Message, Box<dyn std::error::Error>> {
+    async fn get_message_for_read_receipt(&self, message_id: Uuid) -> Result<crate::models::Message, crate::services::MessagingError> {
         let message = sqlx::query_as!(
             crate::models::Message,
             "SELECT * FROM messages WHERE id = $1",
             message_id
         )
-        .fetch_one(&self.messaging_service.db)
+        .fetch_one(self.messaging_service.db())
         .await?;
 
         Ok(message)
