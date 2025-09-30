@@ -11,7 +11,7 @@ tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
 
 # Database
-sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono", "json", "migrate"] }
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono", "json", "migrate", "ipnetwork"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -47,6 +47,9 @@ rust_decimal = { version = "1.32", features = ["serde-with-str"] }
 
 # Random number generation
 rand = "0.8"
+
+# IP network handling
+ipnetwork = "0.20"
 
 # WebSocket support
 axum-websocket = "0.1"

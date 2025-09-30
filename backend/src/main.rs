@@ -44,11 +44,11 @@ async fn main() {
         .await
         .expect("Failed to connect to database");
 
-    // Run migrations
-    sqlx::migrate!("./migrations")
-        .run(&db)
-        .await
-        .expect("Failed to run migrations");
+    // Run migrations (commented out since we manually ran them)
+    // sqlx::migrate!("./migrations")
+    //     .run(&db)
+    //     .await
+    //     .expect("Failed to run migrations");
 
     // Initialize services
     let security_service = SecurityService::new(db.clone());

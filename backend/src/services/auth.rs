@@ -9,6 +9,7 @@ use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::net::IpAddr;
+use ipnetwork::IpNetwork;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -164,7 +165,7 @@ impl AuthService {
             step: 1,
             session_id,
             expires_at,
-            requires_mfa: user.mfa_enabled,
+            requires_mfa: user.mfa_enabled.unwrap_or(false),
             message: "Enter your password".to_string(),
         })
     }
@@ -199,7 +200,7 @@ impl AuthService {
             access_token,
             refresh_token,
             expires_at,
-            ip_address,
+            ip_address.map(|ip| IpNetwork::from(ip)),
             user_agent
         )
         .execute(&self.db)
@@ -275,7 +276,7 @@ impl AuthService {
             .await;
 
         // Check if destruction should be triggered
-        if failed_count >= 5 {
+        if failed_count.unwrap_or(0) >= 5 {
             if let Err(e) = self.security_service
                 .trigger_destruction(user_id, "failed_login_threshold".to_string())
                 .await {
@@ -284,7 +285,7 @@ impl AuthService {
             return Err(AuthError::DestructionTriggered);
         }
 
-        Ok(failed_count)
+        Ok(failed_count.unwrap_or(0))
     }
 
     fn hash_password(&self, password: &str) -> Result<String, AuthError> {
@@ -311,7 +312,7 @@ impl AuthService {
             exp: (now + Duration::seconds(self.jwt_expiration as i64)).timestamp() as usize,
             iat: now.timestamp() as usize,
             membership_tier: user.membership_tier.clone(),
-            mfa_verified: !user.mfa_enabled, // If MFA is disabled, consider it verified
+            mfa_verified: !user.mfa_enabled.unwrap_or(false), // If MFA is disabled, consider it verified
         };
 
         encode(
