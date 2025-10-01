@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useWebSocketStore, Conversation } from '../../services/websocket';
+import ConversationShare from './ConversationShare';
 import { 
   ChatBubbleLeftRightIcon, 
   UsersIcon, 
   LockClosedIcon,
-  EllipsisVerticalIcon 
+  EllipsisVerticalIcon,
+  ShareIcon,
+  UserPlusIcon
 } from '@heroicons/react/24/outline';
 
 interface ConversationListProps {
@@ -18,7 +21,9 @@ const ConversationList: React.FC<ConversationListProps> = ({
   selectedConversationId 
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const { conversations, messages, userPresence } = useWebSocketStore();
+  const [showNewConversationModal, setShowNewConversationModal] = useState(false);
+  const [shareConversationId, setShareConversationId] = useState<string | null>(null);
+  const { conversations, messages, userPresence, createConversation } = useWebSocketStore();
 
   const filteredConversations = conversations.filter(conv =>
     conv.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -76,6 +81,25 @@ const ConversationList: React.FC<ConversationListProps> = ({
     ).length;
   };
 
+  const handleNewConversation = () => {
+    // For now, create a simple test conversation
+    const testConversationName = `Test Conversation ${Date.now()}`;
+    createConversation(testConversationName, ['test@example.com']);
+    setShowNewConversationModal(false);
+  };
+
+  const handleShareConversation = (conversationId: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent conversation selection
+    setShareConversationId(conversationId);
+  };
+
+  const startDirectChat = () => {
+    const email = prompt('Enter email address for direct chat:');
+    if (email && email.trim()) {
+      createConversation("", [email.trim()]);
+    }
+  };
+
   return (
     <div className="h-full flex flex-col bg-gradient-to-b from-circle-gray to-circle-dark border-r border-gray-700">
       {/* Header */}
@@ -114,7 +138,7 @@ const ConversationList: React.FC<ConversationListProps> = ({
                   animate={{ opacity: 1, x: 0 }}
                   whileHover={{ x: 4 }}
                   onClick={() => onSelectConversation(conversation.id)}
-                  className={`p-3 rounded-lg cursor-pointer transition-all duration-200 ${
+                  className={`group p-3 rounded-lg cursor-pointer transition-all duration-200 ${
                     isSelected
                       ? 'bg-circle-blue/20 border border-circle-blue'
                       : 'hover:bg-white/5 border border-transparent'
@@ -173,9 +197,13 @@ const ConversationList: React.FC<ConversationListProps> = ({
                       </div>
                     </div>
 
-                    {/* Menu button */}
-                    <button className="p-1 text-gray-400 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                      <EllipsisVerticalIcon className="h-4 w-4" />
+                    {/* Share button - appears on hover */}
+                    <button 
+                      onClick={(e) => handleShareConversation(conversation.id, e)}
+                      className="p-1 text-gray-400 hover:text-circle-blue opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Share conversation"
+                    >
+                      <ShareIcon className="h-4 w-4" />
                     </button>
                   </div>
                 </motion.div>
@@ -186,11 +214,32 @@ const ConversationList: React.FC<ConversationListProps> = ({
       </div>
 
       {/* Footer */}
-      <div className="p-4 border-t border-gray-700">
-        <button className="w-full py-2 bg-circle-blue hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors">
-          + New Conversation
+      <div className="p-4 border-t border-gray-700 space-y-2">
+        <button 
+          onClick={handleNewConversation}
+          className="w-full py-2 bg-circle-blue hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors"
+        >
+          + New Group Chat
+        </button>
+        
+        <button 
+          onClick={startDirectChat}
+          className="w-full py-2 bg-circle-green hover:bg-green-700 text-white rounded-lg font-semibold transition-colors flex items-center justify-center"
+        >
+          <UserPlusIcon className="h-4 w-4 mr-2" />
+          Start Direct Chat
         </button>
       </div>
+
+      {/* Conversation Share Modal */}
+      {shareConversationId && (
+        <ConversationShare
+          isOpen={true}
+          onClose={() => setShareConversationId(null)}
+          conversationId={shareConversationId}
+          conversationName={conversations.find(c => c.id === shareConversationId)?.name}
+        />
+      )}
     </div>
   );
 };

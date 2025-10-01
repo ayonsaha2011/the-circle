@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
 import Landing from './pages/Landing';
@@ -37,6 +37,13 @@ const DestroyedPage: React.FC = () => {
 };
 
 function App() {
+  const { checkAuth } = useAuthStore();
+
+  useEffect(() => {
+    // Check authentication status when app loads
+    checkAuth();
+  }, [checkAuth]);
+
   return (
     <Router>
       <div className="App">

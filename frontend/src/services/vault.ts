@@ -313,10 +313,13 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      const files = await vaultService.getFileList(conversationId);
+      const filesResponse = await vaultService.getFileList(conversationId);
+      // Ensure we always set an array
+      const files = Array.isArray(filesResponse) ? filesResponse : (filesResponse?.files || []);
       set({ files, isLoading: false });
     } catch (error: any) {
-      set({ error: error.message, isLoading: false });
+      console.error('Failed to load files:', error);
+      set({ error: error.message, isLoading: false, files: [] });
     }
   },
 

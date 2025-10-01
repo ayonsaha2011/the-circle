@@ -334,12 +334,69 @@ impl AuthService {
     }
 
     pub fn verify_token(&self, token: &str) -> Result<Claims, AuthError> {
-        decode::<Claims>(
+        tracing::info!("🔍 Verifying JWT token with secret length: {}", self.jwt_secret.len());
+        tracing::debug!("🔍 Token to verify: {}...", &token[..std::cmp::min(50, token.len())]);
+        tracing::debug!("🔍 JWT secret preview: {}...", &self.jwt_secret[..std::cmp::min(20, self.jwt_secret.len())]);
+        
+        match decode::<Claims>(
             token,
             &DecodingKey::from_secret(self.jwt_secret.as_ref()),
             &Validation::default(),
+        ) {
+            Ok(token_data) => {
+                tracing::info!("✅ Token verification successful for user: {}", token_data.claims.sub);
+                Ok(token_data.claims)
+            }
+            Err(e) => {
+                tracing::error!("❌ Token verification failed with error: {:?}", e);
+                tracing::error!("❌ Error details: {}", e);
+                Err(AuthError::InvalidToken)
+            }
+        }
+    }
+
+    pub async fn refresh_access_token(&self, refresh_token: &str) -> Result<String, AuthError> {
+        tracing::info!("🔄 Attempting to refresh access token with refresh token: {}...", &refresh_token[..std::cmp::min(20, refresh_token.len())]);
+        
+        // Find active session with this refresh token
+        let session = sqlx::query!(
+            r#"
+            SELECT user_id, refresh_expires_at 
+            FROM user_sessions 
+            WHERE refresh_token = $1 AND is_active = true
+            "#,
+            refresh_token
         )
-        .map(|token_data| token_data.claims)
-        .map_err(|_| AuthError::InvalidToken)
+        .fetch_optional(&self.db)
+        .await?
+        .ok_or(AuthError::InvalidToken)?;
+
+        // Check if refresh token is expired (if refresh_expires_at is set)
+        if let Some(refresh_expires_at) = session.refresh_expires_at {
+            if refresh_expires_at < chrono::Utc::now() {
+                tracing::error!("❌ Refresh token expired");
+                return Err(AuthError::InvalidToken);
+            }
+        }
+
+        // Get user details
+        let user = sqlx::query_as!(User, "SELECT * FROM users WHERE id = $1", session.user_id)
+            .fetch_one(&self.db)
+            .await
+            .map_err(|_| AuthError::UserNotFound)?;
+
+        // Generate new access token
+        let new_access_token = self.generate_access_token(&user)?;
+        
+        // Update session last_used_at
+        sqlx::query!(
+            "UPDATE user_sessions SET last_used_at = NOW() WHERE refresh_token = $1",
+            refresh_token
+        )
+        .execute(&self.db)
+        .await?;
+
+        tracing::info!("✅ Access token refreshed successfully for user: {}", user.id);
+        Ok(new_access_token)
     }
 }

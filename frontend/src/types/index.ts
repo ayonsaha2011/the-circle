@@ -33,10 +33,10 @@ export interface LoginStepResponse {
 }
 
 export interface LoginResponse {
-  accessToken: string;
-  refreshToken: string;
+  access_token: string;
+  refresh_token: string;
   user: User;
-  expiresAt: string;
+  expires_at: string;
 }
 
 export interface TokenResponse {

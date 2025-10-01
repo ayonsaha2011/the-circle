@@ -153,15 +153,40 @@ pub async fn logout(
 }
 
 pub async fn refresh_token(
-    State(_app_state): State<AppState>,
-    Json(_payload): Json<Value>,
+    State(app_state): State<AppState>,
+    Json(payload): Json<Value>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    // Implement refresh token logic
-    // For now, return not implemented
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(json!({
-            "error": "Refresh token functionality not yet implemented"
-        })),
-    ))
+    let refresh_token = payload["refresh_token"]
+        .as_str()
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Refresh token is required"})),
+            )
+        })?;
+
+    match app_state.auth_service.refresh_access_token(refresh_token).await {
+        Ok(new_access_token) => Ok(Json(json!({
+            "access_token": new_access_token,
+            "token_type": "Bearer"
+        }))),
+        Err(e) => {
+            let (status, message) = match e {
+                crate::services::AuthError::InvalidToken => {
+                    (StatusCode::UNAUTHORIZED, "Invalid or expired refresh token")
+                }
+                crate::services::AuthError::UserNotFound => {
+                    (StatusCode::NOT_FOUND, "User not found")
+                }
+                _ => (StatusCode::INTERNAL_SERVER_ERROR, "Token refresh failed"),
+            };
+
+            Err((
+                status,
+                Json(json!({
+                    "error": message
+                })),
+            ))
+        }
+    }
 }

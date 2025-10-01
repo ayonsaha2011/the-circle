@@ -74,11 +74,12 @@ pub enum WebSocketMessage {
     AuthResult { success: bool, user_id: Option<Uuid> },
     
     // Messaging
+    SendMessage { conversationId: String, content: String, messageType: String },
     MessageSent { message: crate::models::MessagePublic },
     MessageReceived { message: crate::models::MessagePublic },
-    MessageRead { message_id: Uuid, user_id: Uuid },
-    TypingStart { conversation_id: Uuid, user_id: Uuid },
-    TypingStop { conversation_id: Uuid, user_id: Uuid },
+    MessageRead { messageId: String, conversationId: String },
+    TypingStart { conversationId: String },
+    TypingStop { conversationId: String },
     
     // Presence
     PresenceUpdate { user_id: Uuid, status: String, custom_status: Option<String> },

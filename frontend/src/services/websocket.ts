@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import ClientEncryptionService from './encryption';
+import ApiService from './api';
 
 // Message interfaces
 export interface Message {
   id: string;
   conversationId: string;
   senderId?: string;
-  content: string; // Decrypted content
+  content: string; // Decrypted content for display
+  content_encrypted?: string; // Raw encrypted content from backend
   messageType: string;
   replyToId?: string;
   createdAt: string;
@@ -43,6 +45,7 @@ interface WebSocketState {
   socket: WebSocket | null;
   isConnected: boolean;
   isAuthenticated: boolean;
+  isConnecting: boolean;
   conversations: Conversation[];
   messages: Record<string, Message[]>; // conversationId -> messages
   userPresence: Record<string, UserPresence>;
@@ -68,45 +71,65 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   socket: null,
   isConnected: false,
   isAuthenticated: false,
+  isConnecting: false,
   conversations: [],
   messages: {},
   userPresence: {},
   typingUsers: {},
 
   connect: (token: string) => {
-    const { socket, isConnected } = get();
+    const { socket, isConnected, isConnecting } = get();
     
     // Avoid creating duplicate connections
-    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-      console.log('WebSocket already connected or connecting');
+    if (isConnecting || (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING))) {
+      console.log('WebSocket already connected or connecting, skipping...');
       return;
     }
 
+    console.log('🔌 Connecting to WebSocket with token:', token ? token.substring(0, 20) + '...' : 'null');
+    set({ isConnecting: true });
+    
     const socketUrl = process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws';
-    console.log('🔌 Connecting to WebSocket:', socketUrl);
+    console.log('🔌 Connecting to:', socketUrl);
     const newSocket = new WebSocket(socketUrl);
 
     // Connection events
     newSocket.onopen = () => {
       console.log('🔗 WebSocket connected');
-      set({ isConnected: true, socket: newSocket });
+      set({ isConnected: true, isConnecting: false, socket: newSocket });
       
       // Authenticate immediately
       const authMessage = {
         type: 'Authenticate',
         token: token
       };
+      console.log('🔐 Sending authentication message...');
       newSocket.send(JSON.stringify(authMessage));
     };
 
-    newSocket.onclose = () => {
-      console.log('💔 WebSocket disconnected');
-      set({ isConnected: false, isAuthenticated: false, socket: null });
+    newSocket.onclose = (event) => {
+      console.log('💔 WebSocket disconnected. Code:', event.code, 'Reason:', event.reason);
+      set({ isConnected: false, isAuthenticated: false, isConnecting: false, socket: null });
+      
+      // Auto-reconnect if it was an unexpected disconnect
+      if (event.code !== 1000) {
+        console.log('🔄 Attempting to reconnect in 3 seconds...');
+        setTimeout(() => {
+          const currentState = get();
+          if (!currentState.isConnected && !currentState.isConnecting) {
+            const storedToken = localStorage.getItem('access_token');
+            if (storedToken && storedToken !== 'undefined' && storedToken !== 'null') {
+              console.log('🔄 Auto-reconnecting...');
+              get().connect(storedToken);
+            }
+          }
+        }, 3000);
+      }
     };
 
     newSocket.onerror = (error) => {
       console.error('❌ WebSocket connection error:', error);
-      set({ isConnected: false, isAuthenticated: false });
+      set({ isConnected: false, isAuthenticated: false, isConnecting: false });
     };
 
     newSocket.onmessage = (event) => {
@@ -117,16 +140,30 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
         switch (message.type) {
           case 'AuthResult':
             if (message.success) {
-              console.log('✅ WebSocket authenticated');
+              console.log('✅ WebSocket authenticated successfully');
               set({ isAuthenticated: true });
             } else {
-              console.error('❌ WebSocket authentication failed');
+              console.error('❌ WebSocket authentication failed:', message.message);
               set({ isAuthenticated: false });
             }
             break;
             
           case 'MessageReceived':
-            get().handleMessageReceived(message.message);
+            // Process the received message and decrypt content
+            const receivedMessage = {
+              id: message.message.id,
+              conversationId: message.message.conversation_id || '',
+              senderId: message.message.sender_id,
+              content: message.message.content_encrypted, // For now, treat as plaintext (in production, decrypt this)
+              content_encrypted: message.message.content_encrypted,
+              messageType: message.message.message_type || 'text',
+              replyToId: message.message.reply_to_id,
+              createdAt: message.message.created_at,
+              editedAt: message.message.edited_at,
+              readBy: message.message.read_by || [],
+              reactions: message.message.reactions || {},
+            };
+            get().handleMessageReceived(receivedMessage);
             break;
             
           case 'MessageRead':
@@ -183,6 +220,12 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
             
           case 'Error':
             console.error('🚨 WebSocket error:', message.message);
+            // Show user-friendly error notification
+            if (message.message?.includes('Failed to send message')) {
+              alert('Failed to send message. Please check that the conversation exists and try again.');
+            } else {
+              alert(`WebSocket Error: ${message.message}`);
+            }
             break;
             
           default:
@@ -197,15 +240,18 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   },
 
   disconnect: () => {
-    const { socket } = get();
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      console.log('Disconnecting WebSocket...');
-      socket.close();
+    const { socket, isConnected } = get();
+    
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+      console.log('🔌 Disconnecting WebSocket...');
+      socket.close(1000, 'Client disconnecting');
     }
+    
     set({ 
       socket: null, 
       isConnected: false, 
       isAuthenticated: false,
+      isConnecting: false,
       conversations: [],
       messages: {},
       userPresence: {},
@@ -214,17 +260,46 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   },
 
   sendMessage: (conversationId: string, content: string, messageType = 'text') => {
-    const { socket, isAuthenticated } = get();
-    if (!socket || !isAuthenticated || socket.readyState !== WebSocket.OPEN) return;
-
-    const messageData = {
-      type: 'SendMessage',
-      conversationId,
-      content,
-      messageType,
-    };
-
-    socket.send(JSON.stringify(messageData));
+    const { socket, isAuthenticated, isConnected } = get();
+    
+    console.log('🔍 SendMessage check:', {
+      socketExists: !!socket,
+      socketState: socket?.readyState,
+      isAuthenticated,
+      isConnected,
+      conversationId
+    });
+    
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      console.error('🚨 Cannot send message: WebSocket not connected');
+      console.error('Socket state:', socket?.readyState);
+      alert('Connection lost. Please refresh the page to reconnect.');
+      return false;
+    }
+    
+    if (!isAuthenticated) {
+      console.error('🚨 Cannot send message: WebSocket not authenticated');
+      alert('Authentication failed. Please refresh the page and try again.');
+      return false;
+    }
+    
+    try {
+      const messageData = {
+        type: 'SendMessage',
+        conversationId,
+        content,
+        messageType,
+      };
+      
+      console.log('📤 Sending message:', messageData);
+      socket.send(JSON.stringify(messageData));
+      console.log('📤 Message sent successfully to conversation:', conversationId);
+      return true;
+    } catch (error) {
+      console.error('🚨 WebSocket error: Failed to send message', error);
+      alert('Failed to send message. Please try again.');
+      return false;
+    }
   },
 
   markMessageRead: (messageId: string, conversationId: string) => {
@@ -265,16 +340,36 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   },
 
   createConversation: (name: string, participantIds: string[]) => {
-    const { socket, isAuthenticated } = get();
-    if (!socket || !isAuthenticated || socket.readyState !== WebSocket.OPEN) return;
-
-    const messageData = {
-      type: 'CreateConversation',
+    // Use HTTP API instead of WebSocket for creating conversations
+    const requestData = {
       name,
-      participantIds,
+      participant_emails: participantIds,
+      conversation_type: participantIds.length > 1 ? 'group' : 'direct',
     };
-
-    socket.send(JSON.stringify(messageData));
+    
+    ApiService.post('/api/conversations', requestData)
+    .then(response => {
+      const conversation = response.data;
+      console.log('✅ Conversation created:', conversation);
+      // Add the new conversation to the store
+      const state = get();
+      const newConversation = {
+        id: conversation.id,
+        name: conversation.name,
+        type: conversation.conversation_type,
+        participants: conversation.participants,
+        unreadCount: 0,
+        updatedAt: conversation.created_at,
+      };
+      set({
+        conversations: [...state.conversations, newConversation],
+      });
+    })
+    .catch(error => {
+      console.error('❌ Failed to create conversation:', error);
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to create conversation';
+      alert(`Failed to create conversation: ${errorMessage}`);
+    });
   },
 
   handleMessageReceived: (message: Message) => {

@@ -107,6 +107,9 @@ const FileVault: React.FC<FileVaultProps> = ({ conversationId, onFileSelect }) =
     }
   };
 
+  // Ensure files is always an array
+  const safeFiles = Array.isArray(files) ? files : [];
+
   return (
     <div className="h-full flex flex-col bg-gradient-to-br from-circle-dark to-gray-900">
       {/* Header */}
@@ -114,7 +117,7 @@ const FileVault: React.FC<FileVaultProps> = ({ conversationId, onFileSelect }) =
         <div>
           <h2 className="text-2xl font-bold text-gradient">Secure File Vault</h2>
           <p className="text-gray-400 mt-1">
-            {conversationId ? 'Conversation Files' : 'Personal Files'} • {files.length} items
+            {conversationId ? 'Conversation Files' : 'Personal Files'} • {safeFiles.length} items
           </p>
         </div>
         
@@ -211,22 +214,13 @@ const FileVault: React.FC<FileVaultProps> = ({ conversationId, onFileSelect }) =
         </div>
       )}
 
-      {/* Main Content Area */}
-      <div
-        className={`flex-1 m-6 rounded-lg border-2 border-dashed transition-all duration-200 ${
-          dragOver 
-            ? 'border-circle-blue bg-circle-blue/10' 
-            : 'border-gray-600 hover:border-gray-500'
-        }`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
-        {isLoading ? (
-          <div className="flex items-center justify-center h-full">
+      {/* Main Content */}
+      <div className="flex-1 overflow-auto">
+        {isLoading && safeFiles.length === 0 ? (
+          <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-circle-blue"></div>
           </div>
-        ) : files.length === 0 ? (
+        ) : safeFiles.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center p-8">
             <FolderIcon className="h-24 w-24 text-gray-600 mb-4" />
             <h3 className="text-xl font-semibold text-gray-400 mb-2">
@@ -244,7 +238,7 @@ const FileVault: React.FC<FileVaultProps> = ({ conversationId, onFileSelect }) =
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-6">
-            {files.map(file => (
+            {safeFiles.map(file => (
               <motion.div
                 key={file.id}
                 layout

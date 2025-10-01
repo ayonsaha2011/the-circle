@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useWebSocketStore } from '../services/websocket';
@@ -15,34 +15,126 @@ import {
 
 const MessagingPage: React.FC = () => {
   const navigate = useNavigate();
-  const { user, isAuthenticated } = useAuthStore();
-  const { connect, disconnect, isConnected, isAuthenticated: wsAuthenticated } = useWebSocketStore();
+  const { user, isAuthenticated, logout, refreshToken } = useAuthStore();
+  const { connect, disconnect, isConnected, isAuthenticated: wsAuthenticated, conversations } = useWebSocketStore();
   
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [showVaultDoor, setShowVaultDoor] = useState(true);
   const [vaultUnlocking, setVaultUnlocking] = useState(false);
+  const componentUnmountingRef = useRef(false);
+  const connectionInitializedRef = useRef(false);
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      navigate('/login');
-      return;
-    }
+    const initializeAuth = async () => {
+      console.log('🔍 Messaging component auth state check:');
+      console.log('  - isAuthenticated:', isAuthenticated);
+      console.log('  - user:', user);
+      console.log('  - access_token in localStorage:', !!localStorage.getItem('access_token'));
+      console.log('  - refresh_token in localStorage:', !!localStorage.getItem('refresh_token'));
+      
+      // First, check for invalid tokens and clear them
+      const token = localStorage.getItem('access_token');
+      const storedRefreshToken = localStorage.getItem('refresh_token');
+      
+      if (token === 'undefined' || token === 'null' || storedRefreshToken === 'undefined' || storedRefreshToken === 'null') {
+        console.log('❌ Found invalid tokens in localStorage, clearing them...');
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        // Also clear Zustand persisted state
+        localStorage.removeItem('auth-storage');
+        console.log('✨ Cleared invalid tokens, please refresh and login again');
+        alert('Session expired. Please refresh the page and login again.');
+        window.location.reload();
+        return;
+      }
+      
+      // Check for state mismatch: authenticated in store but no tokens in localStorage
+      if (isAuthenticated && (!token || !storedRefreshToken)) {
+        console.log('❌ State mismatch: authenticated in store but no valid tokens in localStorage');
+        console.log('🔄 Forcing logout to synchronize auth state');
+        logout();
+        navigate('/login');
+        return;
+      }
+      
+      if (!isAuthenticated) {
+        console.log('❌ User not authenticated, redirecting to login');
+        navigate('/login');
+        return;
+      }
 
-    // Connect to WebSocket with auth token only if not already connected or connecting
-    const token = localStorage.getItem('access_token');
-    if (token && !isConnected) {
-      console.log('Messaging: Initiating WebSocket connection');
-      connect(token);
-    }
-  }, [isAuthenticated, navigate]);
+      console.log('🔐 Auth check - isAuthenticated:', isAuthenticated, 'token exists:', !!token, 'refresh token exists:', !!storedRefreshToken);
+      console.log('🔐 Raw token value:', JSON.stringify(token));
+      console.log('🔐 Token type:', typeof token);
+      console.log('🔐 Token preview:', token ? token.substring(0, 50) + '...' : 'null');
+      
+      // Check if token is invalid (null, undefined, or literal string "undefined")
+      if (!token || token === 'undefined' || token === 'null' || token.trim() === '') {
+        console.log('❌ Invalid or missing access token, clearing localStorage and redirecting to login');
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        logout(); // Also clear Zustand state
+        navigate('/login');
+        return;
+      }
+      
+      // Check if token is expired and attempt refresh
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        const currentTime = Math.floor(Date.now() / 1000);
+        const isTokenExpired = payload.exp <= currentTime;
+        
+        if (isTokenExpired) {
+          console.log('⏰ Token is expired, attempting refresh...');
+          const refreshSuccess = await refreshToken();
+          
+          if (!refreshSuccess) {
+            console.log('❌ Token refresh failed, redirecting to login');
+            navigate('/login');
+            return;
+          }
+          
+          console.log('✅ Token refreshed successfully');
+          // Get the new token for WebSocket connection
+          const newToken = localStorage.getItem('access_token');
+          if (newToken && !isConnected && !connectionInitializedRef.current) {
+            console.log('Messaging: Initiating WebSocket connection with refreshed token');
+            connectionInitializedRef.current = true;
+            connect(newToken);
+          }
+          return;
+        }
+      } catch (error) {
+        console.error('❌ Error parsing token:', error);
+        logout();
+        navigate('/login');
+        return;
+      }
+      
+      if (!isConnected && !connectionInitializedRef.current) {
+        console.log('Messaging: Initiating WebSocket connection with valid token');
+        connectionInitializedRef.current = true;
+        connect(token);
+      }
+    };
 
-  // Separate cleanup effect
+    initializeAuth();
+  }, [isAuthenticated, navigate, isConnected, connect, logout, refreshToken]);
+
+  // Cleanup effect that only runs on actual unmount
   useEffect(() => {
     return () => {
-      // Only disconnect when leaving the messaging page entirely
-      console.log('Messaging: Component unmounting');
+      componentUnmountingRef.current = true;
+      // Small delay to avoid disconnecting during React Strict Mode cycles
+      setTimeout(() => {
+        if (componentUnmountingRef.current) {
+          console.log('Messaging: Component actually unmounting, disconnecting WebSocket');
+          disconnect();
+          connectionInitializedRef.current = false;
+        }
+      }, 100);
     };
-  }, []);
+  }, [disconnect]);
 
   const handleEnterVault = async () => {
     setVaultUnlocking(true);
@@ -93,7 +185,7 @@ const MessagingPage: React.FC = () => {
           <AppHeader />
 
           {/* WebSocket Status */}
-          <div className="flex items-center justify-center py-2 bg-black/50">
+          <div className="flex items-center justify-between py-2 px-4 bg-black/50">
             <div className="flex items-center space-x-2">
               <div className={`w-2 h-2 rounded-full ${
                 isConnected && wsAuthenticated ? 'bg-green-500' : 'bg-red-500'
@@ -102,6 +194,27 @@ const MessagingPage: React.FC = () => {
                 {isConnected && wsAuthenticated ? 'Secure Connection' : 'Connecting...'}
               </span>
             </div>
+            
+            {/* Debug Info */}
+            <div className="text-xs text-gray-500 flex items-center space-x-4">
+              <span>Connected: {isConnected ? '✓' : '✗'}</span>
+              <span>Auth: {wsAuthenticated ? '✓' : '✗'}</span>
+              <span>Convos: {conversations.length}</span>
+              <span>Token: {localStorage.getItem('access_token') ? '✓' : '✗'}</span>
+            </div>
+            
+            {/* Reconnect Button */}
+            {!isConnected && (
+              <button
+                onClick={() => {
+                  const token = localStorage.getItem('access_token');
+                  if (token) connect(token);
+                }}
+                className="text-xs px-2 py-1 bg-circle-blue hover:bg-blue-700 text-white rounded transition-colors"
+              >
+                Reconnect
+              </button>
+            )}
           </div>
 
           {/* Main Content */}

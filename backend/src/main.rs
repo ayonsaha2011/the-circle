@@ -5,7 +5,7 @@ mod services;
 mod utils;
 
 use crate::config::Config;
-use crate::handlers::{auth, health};
+use crate::handlers::{auth, health, vault, messaging};
 use crate::services::{AuthService, SecurityService, MessagingService, EncryptionService, WebSocketService};
 use crate::utils::AppState;
 use axum::{
@@ -20,6 +20,7 @@ use tower::ServiceBuilder;
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
+    limit::RequestBodyLimitLayer,
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -87,6 +88,15 @@ async fn main() {
         .route("/api/auth/login/complete", post(auth::login_complete))
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/auth/refresh", post(auth::refresh_token))
+        // Vault routes
+        .route("/api/vault/files", get(vault::list_files))
+        .route("/api/vault/upload-token", post(vault::create_upload_token))
+        .route("/api/vault/upload/:token", post(vault::upload_file))
+        // Messaging routes
+        .route("/api/conversations", get(messaging::list_conversations))
+        .route("/api/conversations", post(messaging::create_conversation))
+        .route("/api/conversations/:id/participants", post(messaging::add_participants))
+        .route("/api/conversations/:id/invite", post(messaging::create_invite_link))
         // Add state and middleware
         .with_state(app_state)
         .route("/ws", get(WebSocketService::handle_websocket))
@@ -94,6 +104,7 @@ async fn main() {
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
+                .layer(RequestBodyLimitLayer::new(100 * 1024 * 1024)) // 100MB limit
                 .layer(cors)
                 .into_inner(),
         );

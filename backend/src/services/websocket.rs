@@ -81,6 +81,7 @@ impl WebSocketService {
 
     /// Handle individual WebSocket connection
     pub async fn handle_socket(self: Arc<Self>, socket: WebSocket, addr: SocketAddr) {
+        tracing::info!("🔗 New WebSocket connection from: {}", addr);
         let (sender, mut receiver) = socket.split();
         
         // Create broadcast channel for this connection
@@ -181,6 +182,41 @@ impl WebSocketService {
                     }
                 }
                 
+                WebSocketMessage::SendMessage { conversationId, content, messageType } => {
+                    if let Some(user_id) = authenticated_user {
+                        tracing::info!("📤 Received SendMessage from user {} for conversation {}", user_id, conversationId);
+                        
+                        // Parse conversation_id
+                        if let Ok(conversation_uuid) = conversationId.parse::<Uuid>() {
+                            // Create and save message to database
+                            match self.create_and_save_message(user_id, conversation_uuid, content.clone(), messageType.clone()).await {
+                                Ok(message) => {
+                                    tracing::info!("✅ Message saved to database: {}", message.id);
+                                    
+                                    // Create MessageReceived event
+                                    let message_received = WebSocketMessage::MessageReceived { message };
+                                    
+                                    // Broadcast to all conversation participants
+                                    self.broadcast_message_to_conversation(conversation_uuid, &message_received).await;
+                                }
+                                Err(e) => {
+                                    tracing::error!("❌ Failed to save message: {:?}", e);
+                                    let error_msg = WebSocketMessage::Error {
+                                        message: "Failed to send message".to_string(),
+                                    };
+                                    let _ = tx_clone.send(serde_json::to_string(&error_msg).unwrap());
+                                }
+                            }
+                        } else {
+                            tracing::error!("❌ Invalid conversation ID format: {}", conversationId);
+                            let error_msg = WebSocketMessage::Error {
+                                message: "Invalid conversation ID".to_string(),
+                            };
+                            let _ = tx_clone.send(serde_json::to_string(&error_msg).unwrap());
+                        }
+                    }
+                }
+                
                 WebSocketMessage::MessageSent { message } => {
                     if let Some(user_id) = authenticated_user {
                         // Broadcast message to conversation participants
@@ -189,47 +225,25 @@ impl WebSocketService {
                         }
                     }
                 }
-
-                WebSocketMessage::MessageRead { message_id, user_id: reader_id } => {
+                
+                WebSocketMessage::MessageRead { messageId, conversationId } => {
                     if let Some(user_id) = authenticated_user {
-                        if user_id == reader_id {
-                            // Mark message as read
-                            let _ = self.messaging_service.mark_message_read(user_id, message_id).await;
-                            
-                            // Broadcast read receipt
-                            if let Ok(message) = self.get_message_for_read_receipt(message_id).await {
-                                if let Some(conversation_id) = message.conversation_id {
-                                    self.broadcast_message_to_conversation(
-                                        conversation_id,
-                                        &WebSocketMessage::MessageRead { message_id, user_id }
-                                    ).await;
-                                }
-                            }
-                        }
+                        tracing::info!("📖 User {} marked message {} as read in conversation {}", user_id, messageId, conversationId);
+                        // TODO: Implement message read functionality
                     }
                 }
 
-                WebSocketMessage::TypingStart { conversation_id, user_id: typer_id } => {
+                WebSocketMessage::TypingStart { conversationId } => {
                     if let Some(user_id) = authenticated_user {
-                        if user_id == typer_id {
-                            self.broadcast_to_conversation_except_user(
-                                conversation_id,
-                                user_id,
-                                &WebSocketMessage::TypingStart { conversation_id, user_id }
-                            ).await;
-                        }
+                        tracing::info!("⌨️ User {} started typing in conversation {}", user_id, conversationId);
+                        // TODO: Broadcast typing indicator to other participants
                     }
                 }
 
-                WebSocketMessage::TypingStop { conversation_id, user_id: typer_id } => {
+                WebSocketMessage::TypingStop { conversationId } => {
                     if let Some(user_id) = authenticated_user {
-                        if user_id == typer_id {
-                            self.broadcast_to_conversation_except_user(
-                                conversation_id,
-                                user_id,
-                                &WebSocketMessage::TypingStop { conversation_id, user_id }
-                            ).await;
-                        }
+                        tracing::info!("⌨️ User {} stopped typing in conversation {}", user_id, conversationId);
+                        // TODO: Broadcast typing stop to other participants
                     }
                 }
 
@@ -272,8 +286,28 @@ impl WebSocketService {
 
     /// Authenticate user with JWT token
     async fn authenticate_user(&self, token: &str) -> Result<Uuid, WebSocketError> {
-        let claims = self.auth_service.verify_token(token)?;
-        let user_id = claims.sub.parse::<Uuid>().map_err(|_| WebSocketError::ParseError)?;
+        tracing::info!("🔐 WebSocket: Attempting to authenticate with token: {}...", &token[..std::cmp::min(20, token.len())]);
+        tracing::info!("🔐 WebSocket: Full token: {}", token);
+        
+        let claims = match self.auth_service.verify_token(token) {
+            Ok(claims) => {
+                tracing::info!("✅ WebSocket: Token verification successful for user: {}", claims.sub);
+                tracing::info!("✅ WebSocket: Token claims: exp={}, iat={}, membership_tier={}, mfa_verified={}", claims.exp, claims.iat, claims.membership_tier, claims.mfa_verified);
+                claims
+            }
+            Err(e) => {
+                tracing::error!("❌ WebSocket: Token verification failed: {:?}", e);
+                tracing::error!("❌ WebSocket: Token that failed: {}", token);
+                return Err(WebSocketError::AuthError(e));
+            }
+        };
+        
+        let user_id = claims.sub.parse::<Uuid>().map_err(|e| {
+            tracing::error!("❌ WebSocket: Failed to parse user_id from claims.sub '{}': {:?}", claims.sub, e);
+            WebSocketError::ParseError
+        })?;
+        
+        tracing::info!("✅ WebSocket: Authentication successful for user_id: {}", user_id);
         Ok(user_id)
     }
 
@@ -403,5 +437,45 @@ impl WebSocketService {
     /// Get connected users
     pub async fn get_connected_users(&self) -> Vec<Uuid> {
         self.connections.read().await.keys().copied().collect()
+    }
+
+    /// Create and save a message to the database
+    async fn create_and_save_message(
+        &self,
+        user_id: Uuid,
+        conversation_id: Uuid,
+        content: String,
+        message_type: String,
+    ) -> Result<crate::models::MessagePublic, Box<dyn std::error::Error + Send + Sync>> {
+        // For now, we'll store the content as "encrypted" (in real app, this would be properly encrypted)
+        let content_encrypted = content; // In production, encrypt this
+        let message_id = Uuid::new_v4();
+        
+        // Save message to database
+        sqlx::query!(
+            r#"
+            INSERT INTO messages (id, conversation_id, sender_id, content_encrypted, message_type, read_by)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+            message_id,
+            conversation_id,
+            user_id,
+            content_encrypted,
+            message_type,
+            serde_json::json!([user_id.to_string()]) // Sender has read it by default
+        )
+        .execute(self.messaging_service.db())
+        .await?;
+        
+        // Fetch the created message
+        let message = sqlx::query_as!(
+            crate::models::Message,
+            "SELECT * FROM messages WHERE id = $1",
+            message_id
+        )
+        .fetch_one(self.messaging_service.db())
+        .await?;
+        
+        Ok(message.to_public())
     }
 }

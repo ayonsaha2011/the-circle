@@ -12,10 +12,11 @@ interface AuthState {
   // Actions
   login: (credentials: LoginRequest) => Promise<void>;
   register: (data: RegisterRequest) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   clearError: () => void;
   setUser: (user: User) => void;
-  checkAuth: () => void;
+  checkAuth: () => Promise<void>;
+  refreshToken: () => Promise<boolean>;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -36,7 +37,27 @@ export const useAuthStore = create<AuthState>()(
           // Step 2: Complete login (simplified for Phase 1)
           const loginResponse = await ApiService.loginComplete(credentials);
           
-          const { accessToken, refreshToken, user } = loginResponse.data;
+          console.log('🔑 Login response received:', {
+            hasData: !!loginResponse.data,
+            responseKeys: Object.keys(loginResponse.data || {}),
+            userEmail: loginResponse.data?.user?.email
+          });
+          
+          const { access_token: accessToken, refresh_token: refreshToken, user } = loginResponse.data;
+          
+          // Validate tokens before storing
+          if (!accessToken || accessToken === 'undefined' || typeof accessToken !== 'string') {
+            throw new Error('Invalid access token received from server');
+          }
+          if (!refreshToken || refreshToken === 'undefined' || typeof refreshToken !== 'string') {
+            throw new Error('Invalid refresh token received from server');
+          }
+          
+          console.log('🔑 Storing valid tokens:', {
+            accessTokenPreview: accessToken.substring(0, 20) + '...',
+            refreshTokenPreview: refreshToken.substring(0, 20) + '...',
+            userEmail: user?.email
+          });
           
           // Store tokens
           localStorage.setItem('access_token', accessToken);
@@ -104,7 +125,7 @@ export const useAuthStore = create<AuthState>()(
       
       setUser: (user: User) => set({ user, isAuthenticated: true }),
 
-      checkAuth: () => {
+      checkAuth: async () => {
         const isAuthenticated = ApiService.isAuthenticated();
         if (!isAuthenticated) {
           set({
@@ -114,6 +135,29 @@ export const useAuthStore = create<AuthState>()(
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
         }
+      },
+
+      refreshToken: async () => {
+        const refreshToken = localStorage.getItem('refresh_token');
+        if (!refreshToken) {
+          get().logout();
+          return false;
+        }
+
+        try {
+          const response = await ApiService.post('/api/auth/refresh', { refresh_token: refreshToken });
+          const { access_token: newAccessToken } = response.data;
+          
+          if (newAccessToken) {
+            localStorage.setItem('access_token', newAccessToken);
+            return true;
+          }
+        } catch (error) {
+          console.error('Token refresh failed:', error);
+          get().logout();
+        }
+        
+        return false;
       }
     }),
     {
